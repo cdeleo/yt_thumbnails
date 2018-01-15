@@ -1,3 +1,4 @@
+import argparse
 import googleapiclient.discovery
 import os.path
 import pickle
@@ -13,6 +14,12 @@ CREDENTIALS_FILE = 'credentials.pickle'
 SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 API_SERVICE_NAME = 'youtube'
 API_VERSION = 'v3'
+
+parser = argparse.ArgumentParser(description='Generate YouTube thumbnails.')
+parser.add_argument(
+    '--videos', metavar='video_id,...', type=str,
+    help='force processing for a list of videos')
+args = parser.parse_args()
 
 def get_bg_image_path(name):
   return os.path.join('bg_images', name + '.png')
@@ -42,11 +49,25 @@ def get_authenticated_client():
 
 class Video(object):
 
-  def __init__(self, item):
-    self.video_id = item['id']['videoId']
-    self.name, self.title, self.subtitle = self._parse_video_title(
-        item['snippet']['title'])
+  def __init__(self, video_id):
+    self.video_id = video_id
+    self.name = None
+    self.title = None
+    self.subtitle = None
     self.published = None
+
+  @classmethod
+  def from_item(cls, item):
+    video = cls(item['id']['videoId'])
+    video.update(item)
+    return video
+
+  def update(self, item):
+    if 'snippet' in item:
+      self.name, self.title, self.subtitle = self._parse_video_title(
+          item['snippet']['title'])
+    if 'status' in item:
+      self.published = item['status']['privacyStatus'] == 'public'
 
   @staticmethod
   def _parse_video_title(raw_title):
@@ -64,22 +85,28 @@ class Video(object):
          'subtitle': self.subtitle,
          'published': self.published})
 
-def list_videos(client):
-  # Search videos
-  search_response = client.search().list(
-      type='video', forMine=True, part='snippet', maxResults=25).execute()
-  videos = {}
-  for item in search_response['items']:
-    video = Video(item)
-    if video.name:
-      videos[video.video_id] = video
+def list_videos(client, video_ids=None):
+  if video_ids is None:
+    # Search videos
+    search_response = client.search().list(
+        type='video', forMine=True, part='snippet', maxResults=25).execute()
+    videos = {}
+    for item in search_response['items']:
+      video = Video.from_item(item)
+      if video.name:
+        videos[video.video_id] = video
+    needed_parts = 'status'
+  else:
+    videos = {video_id: Video(video_id) for video_id in video_ids}
+    needed_parts = 'snippet,status'
 
   # List videos
   video_ids = ','.join(v.video_id for v in videos.itervalues())
-  list_response = client.videos().list(id=video_ids, part='status').execute()
+  list_response = client.videos().list(
+      id=video_ids, part=needed_parts).execute()
   for item in list_response['items']:
     video = videos[item['id']]
-    video.published = item['status']['privacyStatus'] == 'public'
+    video.update(item)
 
   return videos.values()
 
@@ -109,23 +136,37 @@ def process_video(client, video):
 
   print 'done.'
 
+def render_number_string(base_str, n, overrides=None):
+  if overrides:
+    for override_n, override_str in overrides:
+      if n == override_n:
+        return override_str % n
+  return base_str % n
+
 def main():
   client = get_authenticated_client()
+
+  if args.videos:
+    videos = list_videos(client, args.videos.split(','))
+  else:
+    videos = [v for v in list_videos(client) if v.subtitle and not v.published]
+
   successes = set()
   failures = {}
-  for video in list_videos(client):
-    if video.subtitle and not video.published:
-      try:
-        process_video(client, video)
-      except:
-        print 'failed!'
-        failures[video.name] = traceback.format_exc()
-      else:
-        successes.add(video.name)
+  for video in videos:
+    try:
+      process_video(client, video)
+    except:
+      print 'failed!'
+      failures[video.name] = traceback.format_exc()
+    else:
+      successes.add(video.name)
 
   print
-  print '%d successes.' % len(successes)
-  print '%d failures:' % len(failures)
+  print render_number_string(
+      '%d successes.', len(successes), [(1, '%d success.')])
+  print render_number_string(
+      '%d failures:', len(failures), [(0, '%d failures.'), (1, '%d failure:')])
   for name, e in failures.iteritems():
     print '%s:' % name
     print '  %s' % e
