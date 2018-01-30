@@ -1,5 +1,6 @@
 import argparse
 import googleapiclient.discovery
+import os
 import os.path
 import pickle
 import re
@@ -15,17 +16,14 @@ SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 API_SERVICE_NAME = 'youtube'
 API_VERSION = 'v3'
 
+BG_IMAGE_DIR = 'bg_images'
+OUTPUT_DIR = 'output'
+
 parser = argparse.ArgumentParser(description='Generate YouTube thumbnails.')
 parser.add_argument(
     '--videos', metavar='video_id,...', type=str,
     help='force processing for a list of videos')
 args = parser.parse_args()
-
-def get_bg_image_path(name):
-  return os.path.join('bg_images', name + '.png')
-
-def get_output_path(name):
-  return os.path.join('output', name + '.png')
 
 def get_credentials():
   if not os.path.exists(CREDENTIALS_FILE):
@@ -56,6 +54,11 @@ class Video(object):
     self.subtitle = None
     self.published = None
 
+    # Derived data
+    self.bg_image_path = None
+    self.bg_image_mid = None
+    self.output_path = None
+
   @classmethod
   def from_item(cls, item):
     video = cls(item['id']['videoId'])
@@ -66,6 +69,7 @@ class Video(object):
     if 'snippet' in item:
       self.name, self.title, self.subtitle = self._parse_video_title(
           item['snippet']['title'])
+      self._load_derived_data()
     if 'status' in item:
       self.published = item['status']['privacyStatus'] == 'public'
 
@@ -76,6 +80,22 @@ class Video(object):
       subtitle = None
     name = re.sub('[^a-zA-Z0-9 ]', '', title).lower().replace(' ', '_')
     return name, title, subtitle
+
+  @staticmethod
+  def _get_bg_image_data(name):
+    simple_bg_image_path = os.path.join(BG_IMAGE_DIR, name + '.png')
+    if os.path.exists(simple_bg_image_path):
+      return simple_bg_image_path, None
+    else:
+      pattern = re.compile('%s_(\d+)\.png' % name)
+      for filename in os.listdir(BG_IMAGE_DIR):
+        match = pattern.match(filename)
+        if match:
+          return os.path.join(BG_IMAGE_DIR, match.group(0)), int(match.group(1))
+
+  def _load_derived_data(self):
+    self.bg_image_path, self.bg_image_mid = self._get_bg_image_data(self.name)
+    self.output_path = os.path.join(OUTPUT_DIR, self.name + '.png')
 
   def __str__(self):
     return str(
@@ -113,18 +133,17 @@ def list_videos(client, video_ids=None):
 def process_video(client, video):
   print 'Processing %s...' % video.name
 
-  thumbnail_path = get_output_path(video.name)
-  if not os.path.exists(thumbnail_path):
+  if not os.path.exists(video.output_path):
     print '  Generating...'
-    with open(get_bg_image_path(video.name)) as bg_image_file:
-      with open(get_output_path(video.name), 'w') as out_file:
+    with open(video.bg_image_path) as bg_image_file:
+      with open(video.output_path, 'w') as out_file:
         thumbnails.generate_thumbnail(
             bg_image_file, video.title, video.subtitle, out_file)
     print '  done.'
 
     print '  Uploading...'
     client.thumbnails().set(
-        videoId=video.video_id, media_body=thumbnail_path).execute()
+        videoId=video.video_id, media_body=video.output_path).execute()
     print '  done.'
 
   if not video.published:
