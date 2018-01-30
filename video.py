@@ -52,7 +52,7 @@ class Video(object):
         match = pattern.match(filename)
         if match:
           return os.path.join(BG_IMAGE_DIR, match.group(0)), int(match.group(1))
-    return None, None          
+    return None, None
 
   def _load_derived_data(self):
     self.bg_image_path, self.bg_image_mid = self._get_bg_image_data(self.name)
