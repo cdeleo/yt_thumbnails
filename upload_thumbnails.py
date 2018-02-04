@@ -1,5 +1,6 @@
 import argparse
 import auth
+import descriptions
 import os.path
 import process_videos
 import resources
@@ -13,8 +14,11 @@ parser.add_argument(
 args = parser.parse_args()
 
 def process_video(client, video):
+  parts_to_update = []
+  resource = {'id': video.video_id}
+
   if not os.path.exists(video.output_path):
-    print '  Generating...'
+    print '  Generating thumbnail...'
     with open(video.bg_image_path) as bg_image_file:
       with open(video.output_path, 'w') as out_file:
         thumbnails.generate_thumbnail(
@@ -26,11 +30,24 @@ def process_video(client, video):
         videoId=video.video_id, media_body=video.output_path).execute()
     print '  done.'
 
+    print '  Generating description...'
+    snippet = video.get_part('snippet')
+    snippet['description'] = descriptions.get(video.bg_image_mid)
+    resource['snippet'] = snippet
+    parts_to_update.append('snippet')
+    print '  done.'
+
   if not video.published:
-    print '  Publishing...'
-    resource = resources.build_resource(
-        {'id': video.video_id, 'status.privacyStatus': 'public'})
-    client.videos().update(body=resource, part='status').execute()
+    print '  Setting publishing...'
+    resource.update(
+        resources.build_resource({'status.privacyStatus': 'public'}))
+    parts_to_update.append('status')
+    print '  done.'
+
+  if parts_to_update:
+    print '  Updating...'
+    client.videos().update(
+        body=resource, part=','.join(parts_to_update)).execute()
     print '  done.'
 
 def main():
@@ -39,7 +56,7 @@ def main():
   if args.videos:
     videos = video.list_videos(client, args.videos.split(','))
   else:
-    videos = [v for v in video.search_videos(client)
+    videos = [v for v in video.search_videos(client)[0]
               if v.subtitle and not v.published]
 
   processor = process_videos.VideoProcessor()
