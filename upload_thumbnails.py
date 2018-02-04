@@ -13,8 +13,6 @@ parser.add_argument(
 args = parser.parse_args()
 
 def process_video(client, video):
-  print 'Processing %s...' % video.name
-
   if not os.path.exists(video.output_path):
     print '  Generating...'
     with open(video.bg_image_path) as bg_image_file:
@@ -35,8 +33,6 @@ def process_video(client, video):
     client.videos().update(body=resource, part='status').execute()
     print '  done.'
 
-  print 'done.'
-
 def main():
   client = auth.get_authenticated_client()
 
@@ -46,7 +42,9 @@ def main():
     videos = [v for v in video.search_videos(client)
               if v.subtitle and not v.published]
 
-  process_videos.process_videos(client, videos, process_video)
+  processor = process_videos.VideoProcessor()
+  processor.process(client, videos, process_video)
+  processor.print_summary()
 
 if __name__ == '__main__':
   main()

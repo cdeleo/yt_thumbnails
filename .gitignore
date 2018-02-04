@@ -2,6 +2,7 @@
 *.svg
 client_id.json
 credentials.pickle
+data/
 output/
 
 # Byte-compiled / optimized / DLL files

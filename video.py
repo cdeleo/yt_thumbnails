@@ -8,10 +8,13 @@ OUTPUT_DIR = 'output'
 class Video(object):
 
   def __init__(self, video_id):
+    self._item_parts = {}
+
     self.video_id = video_id
     self.name = None
     self.title = None
     self.subtitle = None
+    self.description = None
     self.published = None
 
     # Derived data
@@ -26,12 +29,17 @@ class Video(object):
     return video
 
   def update(self, item):
+    self._item_parts.update(item)
     if 'snippet' in item:
       self.name, self.title, self.subtitle = self._parse_video_title(
           item['snippet']['title'])
       self._load_derived_data()
+      self.description = item['snippet'].get('description')
     if 'status' in item:
       self.published = item['status']['privacyStatus'] == 'public'
+
+  def get_part(self, part):
+    return self._item_parts.get(part)
 
   @staticmethod
   def _parse_video_title(raw_title):
@@ -75,16 +83,24 @@ def _finish_loading_videos(client, needed_parts, videos):
     video = video_map[item['id']]
     video.update(item)
 
-def search_videos(client):  
-  search_response = client.search().list(
-      type='video', forMine=True, part='snippet', maxResults=25).execute()
+def search_videos(client, page_token=None):
+  list_args = {
+      'type': 'video',
+      'forMine': True,
+      'part': 'snippet',
+      'maxResults': 25,
+  }
+  if page_token:
+    list_args['pageToken'] = page_token
+  search_response = client.search().list(**list_args).execute()
+
   videos = []
   for item in search_response['items']:
     video = Video.from_item(item)
     if video.name:
       videos.append(video)
-  _finish_loading_videos(client, 'status', videos)
-  return videos
+  _finish_loading_videos(client, 'snippet,status', videos)
+  return videos, search_response.get('nextPageToken')
 
 def list_videos(client, video_ids):
   videos = [Video(video_id) for video_id in video_ids]
