@@ -8,7 +8,7 @@ import process_videos
 import video
 
 def filter_video(video):
-  return video.subtitle and video.published and not video.description
+  return video.subtitle and video.is_published() and not video.description
 
 def process_video(client, video):
   snippet = video.get_part('snippet')

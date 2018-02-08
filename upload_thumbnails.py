@@ -11,6 +11,9 @@ parser = argparse.ArgumentParser(description='Generate YouTube thumbnails.')
 parser.add_argument(
     '--videos', metavar='video_id,...', type=str,
     help='force processing for a list of videos')
+parser.add_argument(
+    '--nopublish', action='store_false',
+    help='Only update videos, do not publish')
 args = parser.parse_args()
 
 def process_video(client, video):
@@ -37,7 +40,7 @@ def process_video(client, video):
     parts_to_update.append('snippet')
     print '  done.'
 
-  if not video.published:
+  if not args.nopublish and not video.is_published():
     print '  Setting publishing...'
     resource.update(
         resources.build_resource({'status.privacyStatus': 'public'}))
@@ -57,7 +60,7 @@ def main():
     videos = video.list_videos(client, args.videos.split(','))
   else:
     videos = [v for v in video.search_videos(client)[0]
-              if v.subtitle and not v.published]
+              if v.subtitle and v.is_staged()]
 
   processor = process_videos.VideoProcessor()
   processor.process(client, videos, process_video)

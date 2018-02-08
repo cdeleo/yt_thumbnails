@@ -2,8 +2,11 @@ import os
 import os.path
 import re
 
+from datetime import datetime
+
 BG_IMAGE_DIR = 'bg_images'
 OUTPUT_DIR = 'output'
+TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
 
 class Video(object):
 
@@ -15,7 +18,6 @@ class Video(object):
     self.title = None
     self.subtitle = None
     self.description = None
-    self.published = None
 
     # Derived data
     self.bg_image_path = None
@@ -28,6 +30,17 @@ class Video(object):
     video.update(item)
     return video
 
+  def _part_guarded(self, *args):
+    def _part_guarded_inner(raw_f):
+      def _guarded_f(self):
+        for part in args:
+          if not self.get_part(part):
+            raise Exception(
+                'Video %s has not loaded part %s.' % (str(self), part))
+        return raw_f(self)
+      return _guarded_f
+    return _part_guarded_inner
+
   def update(self, item):
     self._item_parts.update(item)
     if 'snippet' in item:
@@ -35,11 +48,29 @@ class Video(object):
           item['snippet']['title'])
       self._load_derived_data()
       self.description = item['snippet'].get('description')
-    if 'status' in item:
-      self.published = item['status']['privacyStatus'] == 'public'
 
   def get_part(self, part):
     return self._item_parts.get(part)
+
+  @_part_guarded('status')
+  def is_published(self):
+    return self.get_part('status')['privacyStatus'] == 'public'
+
+  @_part_guarded('status')
+  def is_private(self):
+    return self.get_part('status')['privacyStatus'] == 'private'
+
+  @_part_guarded('status')
+  def is_staged(self):
+    return self.get_part('status')['privacyStatus'] == 'unlisted'
+
+  @_part_guarded('status')
+  def publish_time(self):
+    status = self.get_part('status')
+    if self.is_private() and 'publishAt' in status:
+      return datetime.strptime(status['publishAt'], TIME_FORMAT)
+    else:
+      return None
 
   @staticmethod
   def _parse_video_title(raw_title):
@@ -72,7 +103,7 @@ class Video(object):
          'name': self.name,
          'title': self.title,
          'subtitle': self.subtitle,
-         'published': self.published})
+         'published': self.is_published()})
 
 def _finish_loading_videos(client, needed_parts, videos):
   video_map = {v.video_id: v for v in videos}
